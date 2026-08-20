@@ -55,8 +55,24 @@ public class ZKFingerPrintHelper implements PluginRegistry.RequestPermissionsRes
     private int enroll_index = 0;
     private byte[][] regtemparray = new byte[3][2048];  //register template buffer array
     private boolean bRegister = false;
+    // Scanner mode: device only captures and forwards templates, backend does the matching
+    private boolean bScannerMode = false;
     private DBManager dbManager = new DBManager();
     private String dbFileName;
+
+    // --- Template format conversion (ZK proprietary -> standard ISO/ANSI) ---
+    /** Raw ZK "JQSS21" template - no conversion (default, backward compatible). */
+    public static final int TEMPLATE_FORMAT_ZK = 0;
+    /** ANSI INCITS 378 template. */
+    public static final int TEMPLATE_FORMAT_ANSI_378 = 1;
+    /** ISO/IEC 19794-2 template. */
+    public static final int TEMPLATE_FORMAT_ISO_19794_2 = 2;
+    /** ISO/IEC 19794-2 compact template. */
+    public static final int TEMPLATE_FORMAT_ISO_19794_2_COMPACT = 3;
+    /** ZK SDK parameter id that selects the output template standard. */
+    private static final int PARAM_TEMPLATE_FORMAT = 1;
+    /** Currently selected output format for scanner mode (0 = raw ZK). */
+    private int templateFormat = TEMPLATE_FORMAT_ZK;
 
     private FingerListener mFingerListener;
 
@@ -170,9 +186,29 @@ public class ZKFingerPrintHelper implements PluginRegistry.RequestPermissionsRes
             // For always getting finger base64 feature
             int length = fpTemplate.length;
             String strFeature = Base64.encodeToString(fpTemplate, 0, length, Base64.NO_WRAP);
-            mFingerListener.onStatusChange("Finger extracted OK", FingerStatusType.FINGER_EXTRACTED, "", strFeature);
+            String message = "Finger extracted OK";
+            if (bScannerMode && templateFormat != TEMPLATE_FORMAT_ZK) {
+                // Scanner mode with a standard output format: convert the raw ZK
+                // template to ISO/ANSI before emitting, so apps can POST it directly
+                // to backends that match standard templates (e.g. Laravel + ISO_19794_2).
+                int quality = ZKFingerService.getTemplateQuality(fpTemplate);
+                byte[] stdTemplate = new byte[2048];
+                int len = ZKFingerService.convertTemplate(fpTemplate, stdTemplate);
+                if (len > 0) {
+                    strFeature = Base64.encodeToString(stdTemplate, 0, len, Base64.NO_WRAP);
+                    message = "Finger extracted OK (format=" + templateFormat
+                            + ", quality=" + quality + ", bytes=" + len + ")";
+                } else {
+                    message = "Finger extracted OK (conversion failed ret=" + len
+                            + ", raw ZK template emitted)";
+                }
+            }
+            mFingerListener.onStatusChange(message, FingerStatusType.FINGER_EXTRACTED, "", strFeature);
             if (bRegister) {
                 doRegister(fpTemplate);
+            } else if (bScannerMode) {
+                // Scanner mode: the Base64 template was already emitted above with
+                // FINGER_EXTRACTED. No local identification - forward it to your backend.
             } else {
                 doIdentify(fpTemplate);
             }
@@ -366,6 +402,103 @@ public class ZKFingerPrintHelper implements PluginRegistry.RequestPermissionsRes
         }
     }
 
+    /**
+     * Scanner mode: the device acts purely as a scanner. Each finger press emits a
+     * FINGER_EXTRACTED event carrying the Base64 template (and a PNG preview on the
+     * image stream). No local identify/register is performed - forward the template
+     * to your backend and let it do the rest. Raw ZK templates are emitted.
+     */
+    public void startFingerScanner(String userId) {
+        startFingerScanner(userId, TEMPLATE_FORMAT_ZK);
+    }
+
+    /**
+     * Scanner mode with standard output format. When formatCode is
+     * TEMPLATE_FORMAT_ANSI_378, TEMPLATE_FORMAT_ISO_19794_2 or
+     * TEMPLATE_FORMAT_ISO_19794_2_COMPACT, every captured template is converted
+     * on-device via ZKFingerService.convertTemplate() before being emitted with
+     * FINGER_EXTRACTED, so the app can POST it straight to a backend that matches
+     * standard ISO/ANSI templates.
+     */
+    public void startFingerScanner(String userId, int formatCode) {
+        this.strUid = userId;
+        this.bScannerMode = true;
+        if (!setTemplateFormat(formatCode)) {
+            mFingerListener.onStatusChange("Scanner mode: unsupported template format code " + formatCode
+                    + ", falling back to raw ZK templates", FingerStatusType.STARTED_ERROR, "", "");
+        }
+        if (bStarted) {
+            bRegister = false;
+            enroll_index = 0;
+            mFingerListener.onStatusChange("Scanner mode active (format=" + templateFormat
+                    + ") - forward FINGER_EXTRACTED templates to your backend", FingerStatusType.STARTED_SUCCESS, "", "");
+        } else {
+            startFingerSensor(userId);
+        }
+    }
+
+    /**
+     * Selects the output template standard used by convertTemplate(String) and
+     * scanner-mode captures. Code must be one of the TEMPLATE_FORMAT_* constants.
+     * Returns true when the SDK accepted the parameter.
+     */
+    public boolean setTemplateFormat(int formatCode) {
+        if (formatCode == TEMPLATE_FORMAT_ZK) {
+            templateFormat = formatCode;
+            return true;
+        }
+        if (formatCode < TEMPLATE_FORMAT_ANSI_378 || formatCode > TEMPLATE_FORMAT_ISO_19794_2_COMPACT) {
+            return false;
+        }
+        int ret = ZKFingerService.setParameter(PARAM_TEMPLATE_FORMAT, formatCode);
+        if (ret == 0) {
+            templateFormat = formatCode;
+            return true;
+        }
+        Log.e("ZKFingerPrintHelper", "setTemplateFormat(" + formatCode + ") failed, ret=" + ret);
+        return false;
+    }
+
+    /**
+     * Converts a Base64 ZK template into the currently selected standard format
+     * (see setTemplateFormat(int)). Returns the converted template as Base64,
+     * or null when conversion failed.
+     */
+    public String convertTemplate(String strZkTemplate) {
+        if (strZkTemplate == null || strZkTemplate.isEmpty()) {
+            return null;
+        }
+        try {
+            byte[] zkTemplate = Base64.decode(strZkTemplate, Base64.NO_WRAP);
+            byte[] stdTemplate = new byte[2048];
+            int len = ZKFingerService.convertTemplate(zkTemplate, stdTemplate);
+            if (len > 0) {
+                return Base64.encodeToString(stdTemplate, 0, len, Base64.NO_WRAP);
+            }
+            Log.e("ZKFingerPrintHelper", "convertTemplate failed, ret=" + len);
+        } catch (Exception e) {
+            Log.e("ZKFingerPrintHelper", "convertTemplate error", e);
+        }
+        return null;
+    }
+
+    /**
+     * Quality score (SDK scale) of a Base64 ZK template, or -1 on failure.
+     * Useful to fill the "quality" field when enrolling samples to a backend.
+     */
+    public int getTemplateQuality(String strZkTemplate) {
+        if (strZkTemplate == null || strZkTemplate.isEmpty()) {
+            return -1;
+        }
+        try {
+            byte[] zkTemplate = Base64.decode(strZkTemplate, Base64.NO_WRAP);
+            return ZKFingerService.getTemplateQuality(zkTemplate);
+        } catch (Exception e) {
+            Log.e("ZKFingerPrintHelper", "getTemplateQuality error", e);
+            return -1;
+        }
+    }
+
     public void openDevice() {
 
         if (bStarted) {
@@ -407,6 +540,7 @@ public class ZKFingerPrintHelper implements PluginRegistry.RequestPermissionsRes
 
     public void registerFinger(String strUid) {
         this.strUid = strUid;
+        this.bScannerMode = false;
         if (bStarted) {
             if (null == strUid || strUid.isEmpty()) {
                 mFingerListener.onStatusChange("Please input your user ID", FingerStatusType.ENROLL_FAILED, "", "");
@@ -429,6 +563,7 @@ public class ZKFingerPrintHelper implements PluginRegistry.RequestPermissionsRes
 
     public void identifyFinger(String userId) {
         this.strUid = userId;
+        this.bScannerMode = false;
         if (bStarted) {
             bRegister = false;
             enroll_index = 0;
@@ -498,7 +633,7 @@ public class ZKFingerPrintHelper implements PluginRegistry.RequestPermissionsRes
                     mFingerListener.onStatusChange("Clear DB and load success", FingerStatusType.FINGER_CLEARED_AND_LOADED, "", "");
                 }
             } else {
-                mFingerListener.onStatusChange("Clear DB failed", FingerStatusType.FINGER_CLEAR_FAILED, "", "");
+                mFingerListener.onStatusChange("Clear DB failed!", FingerStatusType.FINGER_CLEAR_FAILED, "", "");
             }
         } catch (Exception e) {
             System.out.println("Something went wrong on clear and laod, check again...");

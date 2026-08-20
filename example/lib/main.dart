@@ -15,7 +15,9 @@ import 'package:zkfinger10/finger_status_type.dart';
 import 'package:zkfinger10/zk_finger.dart';
 import 'package:zkfinger10_example/network_info.dart';
 
+import 'device_log.dart';
 import 'functions.dart';
+import 'log_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -84,8 +86,17 @@ class _MyAppState extends State<MyApp> {
     } on PlatformException {
       platformVersion = 'Failed to get platform version.';
     }
-    ZkFinger.imageStream.receiveBroadcastStream().listen(mapFingerImage);
-    ZkFinger.statusChangeStream.receiveBroadcastStream().listen(updateStatus);
+    DeviceLog.call('getPlatformVersion', platformVersion);
+
+    ZkFinger.imageStream.receiveBroadcastStream().listen(
+      mapFingerImage,
+      onError: (Object e, StackTrace st) => DeviceLog.error('imageStream', e, st),
+    );
+    ZkFinger.statusChangeStream.receiveBroadcastStream().listen(
+      updateStatus,
+      onError: (Object e, StackTrace st) =>
+          DeviceLog.error('statusChangeStream', e, st),
+    );
 
     // If the widget was removed from the tree while the asynchronous platform
     // message was in flight, we want to discard the reply rather than calling
@@ -106,7 +117,9 @@ class _MyAppState extends State<MyApp> {
   bool? isDeviceSupported;
 
   void updateStatus(dynamic value) {
+    DeviceLog.rawStatus(value);
     Map<dynamic, dynamic> statusMap = value as Map<dynamic, dynamic>;
+    DeviceLog.status(statusMap);
     FingerStatusType statusType =
     FingerStatusType.values[statusMap['fingerStatus']];
     fingerStatus = FingerStatus(
@@ -186,13 +199,14 @@ class _MyAppState extends State<MyApp> {
   }
 
   void mapFingerImage(dynamic imageBytes) {
+    print('imageBytes: $imageBytes');
+    DeviceLog.image(imageBytes);
     setState(() {
       try {
         fingerImages = imageBytes;
         base64Image = uint8ListTob64(fingerImages!);
-        print('========= BASE64_IMAGE: $base64Image');
-      } catch (e) {
-        print(e);
+      } catch (e, st) {
+        DeviceLog.error('mapFingerImage', e, st);
       }
     });
   }
@@ -211,7 +225,9 @@ class _MyAppState extends State<MyApp> {
     try {
       // Get all users from database
       final allUsers = await ZkFinger.getAllUsers();
+      DeviceLog.call('getAllUsers', allUsers);
       final userCount = await ZkFinger.getUserCount();
+      DeviceLog.call('getUserCount', userCount);
 
       if (allUsers == null || allUsers.isEmpty) {
         if (mounted) {
@@ -370,7 +386,9 @@ class _MyAppState extends State<MyApp> {
 
     try {
       final allUsers = await ZkFinger.getAllUsers();
+      DeviceLog.call('getAllUsers', allUsers);
       final userCount = await ZkFinger.getUserCount();
+      DeviceLog.call('getUserCount', userCount);
 
       setState(() {
         databaseUsers = allUsers ?? {};
@@ -522,6 +540,18 @@ class _MyAppState extends State<MyApp> {
           ),
           centerTitle: true,
           elevation: 0,
+          actions: <Widget>[
+            Builder(
+              builder: (BuildContext navCtx) => IconButton(
+                tooltip: 'Device log',
+                icon: const Icon(Icons.terminal),
+                onPressed: () => Navigator.of(navCtx).push(
+                  MaterialPageRoute<void>(
+                      builder: (BuildContext _) => const LogScreen()),
+                ),
+              ),
+            ),
+          ],
         ),
         body: Container(
           decoration: BoxDecoration(
@@ -582,7 +612,8 @@ class _MyAppState extends State<MyApp> {
                                                 horizontal: 8, vertical: 8),
                                           ),
                                           onPressed: () async {
-                                            await ZkFinger.openConnection();
+                                            DeviceLog.call('openConnection',
+                                                await ZkFinger.openConnection());
                                           },
                                           icon: const Icon(Icons.power_settings_new,
                                               size: 16),
@@ -601,8 +632,13 @@ class _MyAppState extends State<MyApp> {
                                                 horizontal: 8, vertical: 8),
                                           ),
                                           onPressed: () async {
-                                            await ZkFinger.startListen(
-                                                userId: _registerationCodeController
+                                            DeviceLog.call(
+                                                'startListen',
+                                                await ZkFinger.startListen(
+                                                    userId:
+                                                        _registerationCodeController
+                                                            .text),
+                                                args: _registerationCodeController
                                                     .text);
                                           },
                                           icon: const Icon(Icons.hearing, size: 16),
@@ -621,8 +657,13 @@ class _MyAppState extends State<MyApp> {
                                                 horizontal: 8, vertical: 8),
                                           ),
                                           onPressed: () async {
-                                            await ZkFinger.registerFinger(
-                                                userId: _registerationCodeController
+                                            DeviceLog.call(
+                                                'registerFinger',
+                                                await ZkFinger.registerFinger(
+                                                    userId:
+                                                        _registerationCodeController
+                                                            .text),
+                                                args: _registerationCodeController
                                                     .text);
                                           },
                                           icon: const Icon(Icons.fingerprint,
@@ -640,8 +681,13 @@ class _MyAppState extends State<MyApp> {
                                             foregroundColor: Colors.white,
                                           ),
                                           onPressed: () async {
-                                            await ZkFinger.identify(
-                                                userId: _registerationCodeController
+                                            DeviceLog.call(
+                                                'identify',
+                                                await ZkFinger.identify(
+                                                    userId:
+                                                        _registerationCodeController
+                                                            .text),
+                                                args: _registerationCodeController
                                                     .text);
                                           },
                                           icon: const Icon(Icons.search),
@@ -657,9 +703,13 @@ class _MyAppState extends State<MyApp> {
                                             foregroundColor: Colors.white,
                                           ),
                                           onPressed: () async {
-                                            await ZkFinger.verify(
-                                                finger1: _idleText1.text,
-                                                finger2: _idleText2.text);
+                                            DeviceLog.call(
+                                                'verify',
+                                                await ZkFinger.verify(
+                                                    finger1: _idleText1.text,
+                                                    finger2: _idleText2.text),
+                                                args:
+                                                    'len1=${_idleText1.text.length},len2=${_idleText2.text.length}');
                                           },
                                           icon: const Icon(Icons.verified),
                                           label: const Text('Verify Finger'),
@@ -676,7 +726,8 @@ class _MyAppState extends State<MyApp> {
                                             foregroundColor: Colors.white,
                                           ),
                                           onPressed: () async {
-                                            await ZkFinger.clearFingerDatabase();
+                                            DeviceLog.call('clearFingerDatabase',
+                                                await ZkFinger.clearFingerDatabase());
                                           },
                                           icon: const Icon(Icons.delete_forever),
                                           label: const Text('Clear Database'),
@@ -691,7 +742,8 @@ class _MyAppState extends State<MyApp> {
                                             foregroundColor: Colors.white,
                                           ),
                                           onPressed: () async {
-                                            await ZkFinger.stopListen();
+                                            DeviceLog.call('stopListen',
+                                                await ZkFinger.stopListen());
                                           },
                                           icon: const Icon(Icons.stop),
                                           label: const Text('Stop Listening'),
@@ -706,7 +758,8 @@ class _MyAppState extends State<MyApp> {
                                             foregroundColor: Colors.white,
                                           ),
                                           onPressed: () async {
-                                            await ZkFinger.closeConnection();
+                                            DeviceLog.call('closeConnection',
+                                                await ZkFinger.closeConnection());
                                           },
                                           icon: const Icon(Icons.power_off),
                                           label: const Text('Disconnect'),

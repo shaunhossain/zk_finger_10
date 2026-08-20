@@ -44,6 +44,8 @@ public class ZkFinger10Plugin implements FlutterPlugin, MethodCallHandler, Activ
             "closeConnection";
     private static final String METHOD_FINGER_START_LISTEN =
             "startListen";
+    private static final String METHOD_FINGER_START_SCANNER =
+            "startScanner";
     private static final String METHOD_FINGER_STOP_LISTEN =
             "stopListen";
     private static final String METHOD_FINGER_IDENTIFY =
@@ -70,6 +72,12 @@ public class ZkFinger10Plugin implements FlutterPlugin, MethodCallHandler, Activ
             "updateUserFeature";
     private static final String METHOD_CHECK_USER_EXISTS =
             "checkUserExists";
+    private static final String METHOD_SET_TEMPLATE_FORMAT =
+            "setTemplateFormat";
+    private static final String METHOD_CONVERT_TEMPLATE =
+            "convertTemplate";
+    private static final String METHOD_GET_TEMPLATE_QUALITY =
+            "getTemplateQuality";
 
     private static final String CHANNEL_FINGER_STATUS_CHANGE = "com.mamasodikov.zkfinger10/status_change";
     private static final String CHANNEL_FINGER_IMAGE = "com.mamasodikov.zkfinger10/finger_image";
@@ -249,6 +257,9 @@ public class ZkFinger10Plugin implements FlutterPlugin, MethodCallHandler, Activ
             case METHOD_FINGER_START_LISTEN:
                 startFingerListen(getUserId(call));
                 break;
+            case METHOD_FINGER_START_SCANNER:
+                startFingerScanner(getUserId(call), getTemplateFormat(call));
+                break;
             case METHOD_FINGER_STOP_LISTEN:
                 stopFingerListen();
                 break;
@@ -288,6 +299,15 @@ public class ZkFinger10Plugin implements FlutterPlugin, MethodCallHandler, Activ
             case METHOD_CHECK_USER_EXISTS:
                 checkUserExists(getUserId(call));
                 break;
+            case METHOD_SET_TEMPLATE_FORMAT:
+                setTemplateFormat(getTemplateFormat(call));
+                break;
+            case METHOD_CONVERT_TEMPLATE:
+                convertTemplate(getFingerData(call));
+                break;
+            case METHOD_GET_TEMPLATE_QUALITY:
+                getTemplateQuality(getFingerData(call));
+                break;
             default:
                 result.notImplemented();
         }
@@ -319,6 +339,11 @@ public class ZkFinger10Plugin implements FlutterPlugin, MethodCallHandler, Activ
         return call.argument("data");
     }
 
+    private int getTemplateFormat(MethodCall call) {
+        Integer format = call.argument("format");
+        return format == null ? ZKFingerPrintHelper.TEMPLATE_FORMAT_ZK : format;
+    }
+
     private void openConnection() {
         zkFingerPrintHelper.openDevice();
         result.success(true);
@@ -332,6 +357,11 @@ public class ZkFinger10Plugin implements FlutterPlugin, MethodCallHandler, Activ
 
     private void startFingerListen(String userId) {
         zkFingerPrintHelper.startFingerSensor(userId);
+        result.success(true);
+    }
+
+    private void startFingerScanner(String userId, int formatCode) {
+        zkFingerPrintHelper.startFingerScanner(userId, formatCode);
         result.success(true);
     }
 
@@ -429,6 +459,47 @@ public class ZkFinger10Plugin implements FlutterPlugin, MethodCallHandler, Activ
         }
     }
 
+    /**
+     * Selects the output template standard (0=ZK, 1=ANSI-378, 2=ISO-19794-2,
+     * 3=ISO-19794-2 compact) used by convertTemplate() and scanner captures.
+     */
+    private void setTemplateFormat(int formatCode) {
+        if (zkFingerPrintHelper != null) {
+            boolean success = zkFingerPrintHelper.setTemplateFormat(formatCode);
+            result.success(success);
+        } else {
+            result.error("HELPER_NOT_INITIALIZED", "ZKFingerPrintHelper not initialized", null);
+        }
+    }
+
+    /**
+     * Converts a Base64 ZK template into the currently selected standard
+     * format. Returns the converted Base64 template or an error on failure.
+     */
+    private void convertTemplate(String zkTemplate) {
+        if (zkFingerPrintHelper != null) {
+            String converted = zkFingerPrintHelper.convertTemplate(zkTemplate);
+            if (converted != null) {
+                result.success(converted);
+            } else {
+                result.error("CONVERT_FAILED", "Template conversion failed (check that a standard format is selected and the sensor service is initialized)", null);
+            }
+        } else {
+            result.error("HELPER_NOT_INITIALIZED", "ZKFingerPrintHelper not initialized", null);
+        }
+    }
+
+    /**
+     * Quality score of a Base64 ZK template, or -1 on failure.
+     */
+    private void getTemplateQuality(String zkTemplate) {
+        if (zkFingerPrintHelper != null) {
+            result.success(zkFingerPrintHelper.getTemplateQuality(zkTemplate));
+        } else {
+            result.error("HELPER_NOT_INITIALIZED", "ZKFingerPrintHelper not initialized", null);
+        }
+    }
+
 
     @Override
     public void onStatusChange(String message, FingerStatusType fingerStatusType, String id, String data) {
@@ -444,7 +515,7 @@ public class ZkFinger10Plugin implements FlutterPlugin, MethodCallHandler, Activ
 //        //or we can calculate bytes this way. Use a different value than 4 if you don't use 32bit images.
 //        //int bytes = b.getWidth()*b.getHeight()*4;
 //        ByteBuffer buffer = ByteBuffer.allocate(bytes); //Create a new buffer
-//        fingerBitmap.copyPixelsToBuffer(buffer); //Move the byte data to the buffer
+//        fingerBitmap.copyPixelsToBuffer(buffer); //Move the byte data to the buffer.
 //        byte[] array = buffer.array(); //Get the underlying array containing the data.
 
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
@@ -456,5 +527,3 @@ public class ZkFinger10Plugin implements FlutterPlugin, MethodCallHandler, Activ
     }
 
 }
-
-

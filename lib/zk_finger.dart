@@ -2,6 +2,26 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+/// Output template standards supported by the ZK SDK's on-device converter.
+enum ZkTemplateFormat {
+  /// Raw proprietary ZK "JQSS21" template (~2732 Base64 chars). No conversion.
+  zk,
+
+  /// ANSI INCITS 378 finger minutiae record.
+  ansi378,
+
+  /// ISO/IEC 19794-2 finger minutiae record.
+  iso19794_2,
+
+  /// ISO/IEC 19794-2 compact card format.
+  iso19794_2Compact,
+}
+
+extension ZkTemplateFormatCode on ZkTemplateFormat {
+  /// Method-channel code understood by the Android side.
+  int get code => index;
+}
+
 ///TODO: Catch app lifecycles on kill (and close connection)
 class ZkFinger {
   static const MethodChannel _channel = const MethodChannel('zkfinger');
@@ -26,6 +46,27 @@ class ZkFinger {
   static Future<bool?> startListen({String? userId}) async {
     return _channel
         .invokeMethod('startListen', <String, String?>{'id': userId});
+  }
+
+  /// Scanner mode: use the device purely as a scanner.
+  ///
+  /// Every finger press emits a [FingerStatusType.FINGER_EXTRACTED] event on
+  /// [statusChangeStream] with the Base64 template in its `data` field (plus a
+  /// PNG preview on [imageStream]). No local identify/register is performed -
+  /// forward the template to your backend and let it do the matching/storage.
+  ///
+  /// Pass [format] to convert each captured template on-device into a standard
+  /// ISO/ANSI template (default: raw ZK). Use e.g. [ZkTemplateFormat.iso19794_2]
+  /// when your backend matches standard 19794-2 templates, so the emitted
+  /// Base64 can be POSTed directly.
+  static Future<bool?> startScanner({
+    String? userId,
+    ZkTemplateFormat format = ZkTemplateFormat.zk,
+  }) async {
+    return _channel.invokeMethod('startScanner', <String, Object?>{
+      'id': userId,
+      'format': format.code,
+    });
   }
 
   static Future<bool?> stopListen() async {
@@ -61,6 +102,39 @@ class ZkFinger {
 
   static Future<bool?> onDestroy() async {
     return await _channel.invokeMethod('onDestroy');
+  }
+
+  // ---------------- Template format conversion (standard ISO/ANSI) ----------
+
+  /// Selects the output template standard used by [convertTemplate] and
+  /// [startScanner] captures. Returns true when the SDK accepted it.
+  static Future<bool?> setTemplateFormat(ZkTemplateFormat format) async {
+    return _channel.invokeMethod(
+        'setTemplateFormat', <String, Object?>{'format': format.code});
+  }
+
+  /// Converts a Base64 raw ZK template into the currently selected standard
+  /// format (see [setTemplateFormat]). Returns the converted Base64 template,
+  /// or null on failure (sensor service not initialized, unsupported format,
+  /// or invalid input).
+  static Future<String?> convertTemplate(String zkTemplate) async {
+    try {
+      return await _channel
+          .invokeMethod('convertTemplate', <String, String?>{'data': zkTemplate});
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Quality score (SDK scale) of a Base64 raw ZK template, or -1 on failure.
+  /// Useful to fill the `quality` field when enrolling samples to a backend.
+  static Future<int?> getTemplateQuality(String zkTemplate) async {
+    try {
+      return await _channel
+          .invokeMethod('getTemplateQuality', <String, String?>{'data': zkTemplate});
+    } catch (e) {
+      return -1;
+    }
   }
 
   // New bidirectional data management methods

@@ -1,0 +1,68 @@
+{
+  "_note": "NOT the wire format. The platform channel is StandardMessageCodec (binary). These are the same events after JSON serialization. Values are real, captured 2026-08-19T11:37:13 from a ZK9500.",
+
+  "statusChangeStream": {
+    "_note": "Raw map as delivered, keys exactly as the native side sets them.",
+
+    "event_1_extract": {
+      "message": "Finger extracted OK",
+      "fingerStatus": 30,
+      "id": "",
+      "data": "SlFTUzIxAAADEhAECAUHCc7QAAAvE5EBAABGgj8Y0BKzAIpX0gBKAIwtYgCeAIpkpADjEgBkRQB4AEhkURJeAJhkNABfAAlT1gAiABUpTwDCEodkzQBwAFRN+BLJAIsr7gCnAJEgOgC7AIhIwgHsEo1FCwFQAMoYFhNGAJQblABBAJJAtQDwAIRkwgGzEgwxrgBCAN1HSRLgAH9k5QDUAYV2jAA1AXxkWgBkE3Vbtv0PADJ9rRIzBcv9e4Ba_ELIDED_2732_CHARS_TOTAL_AAAAAAAAAAAAAAA="
+    },
+
+    "event_2_identify": {
+      "message": "Identify succeed, userid: MAMASODIKOV, score: 536",
+      "fingerStatus": 10,
+      "id": "MAMASODIKOV",
+      "data": "536"
+    }
+  },
+
+  "decoded": {
+    "_note": "Same two events, parsed into something you'd actually send to a backend.",
+
+    "extract": {
+      "type": "FINGER_EXTRACTED",
+      "statusIndex": 30,
+      "userId": null,
+      "template": {
+        "encoding": "base64",
+        "variant": "NO_WRAP",
+        "magic": "JQSS21",
+        "charLength": 2732,
+        "byteLength": 2049,
+        "value": "SlFTUzIx…"
+      },
+      "capturedAt": "2026-08-19T11:37:13.416058Z"
+    },
+
+    "identify": {
+      "type": "IDENTIFIED_SUCCESS",
+      "statusIndex": 10,
+      "userId": "MAMASODIKOV",
+      "score": 536,
+      "scoreScale": "native — NOT 0-100. SDK threshold arg is 70, observed good match 536.",
+      "matchedAt": "2026-08-19T11:37:13.416805Z"
+    }
+  },
+
+  "imageStream": {
+    "_note": "Arrives as raw Uint8List, NOT base64 and NOT inside any map. No JSON envelope at all. Base64 only if you encode it yourself.",
+    "wireType": "Uint8List",
+    "format": "PNG (cropped greyscale bitmap)",
+    "typicalBytes": 71234,
+    "base64CharsIfEncoded": 94980
+  },
+
+  "backend_post": {
+    "_note": "Suggested shape for POST /api/fingerprints on ENROLL_SUCCESS. This one IS real JSON — you build it.",
+    "user_id": 42,
+    "finger_index": 1,
+    "pin": "42:1",
+    "template": "SlFTUzIx…",
+    "template_format": "JQSS21",
+    "device": "ZK9500-001003",
+    "enrolled_at": "2026-08-19T11:37:13Z"
+  }
+}
